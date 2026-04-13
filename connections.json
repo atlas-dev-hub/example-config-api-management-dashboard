@@ -1,0 +1,12 @@
+[
+  {
+    "name": "local_system_monitor",
+    "address": "localhost:7000",
+    "insecure": false
+  },
+  {
+    "name": "remote_example",
+    "address": "10.0.0.50:5001",
+    "insecure": false
+  }
+]
