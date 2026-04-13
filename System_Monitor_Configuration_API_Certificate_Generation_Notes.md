@@ -104,9 +104,9 @@ The resulting certificate details were:
 
 ```text
 Subject       : CN=localhost
-Thumbprint    : 2A63BF5D4A3E91DE1A634DA64A5E89505D06E26A
+Thumbprint    : <YOUR_CERTIFICATE_THUMBPRINT>
 HasPrivateKey : True
-NotAfter      : 10/04/2027 14:18:29
+NotAfter      : <EXPIRY_DATE>
 ```
 
 This confirmed:
@@ -114,7 +114,7 @@ This confirmed:
 - the certificate exists,
 - it is for **CN=localhost**,
 - it has a **private key**,
-- it is valid until **10/04/2027 14:18:29**.
+- it has a valid expiry date.
 
 ---
 
@@ -124,13 +124,13 @@ Because System Monitor’s UI needs a **PFX file path**, we exported the certifi
 
 ### Step 4) Create a password object
 ```powershell
-$pwd = ConvertTo-SecureString -String "ChangeThisPassword123!" -Force -AsPlainText
+$pwd = ConvertTo-SecureString -String "YourSecurePassword" -Force -AsPlainText
 ```
 
 ### Step 5) Export the certificate with its private key to a `.pfx`
 ```powershell
 Export-PfxCertificate \
-    -Cert "Cert:\CurrentUser\My\2A63BF5D4A3E91DE1A634DA64A5E89505D06E26A" \
+    -Cert "Cert:\CurrentUser\My\<YOUR_CERTIFICATE_THUMBPRINT>" \
     -FilePath "$env:USERPROFILE\Desktop\localhost.pfx" \
     -Password $pwd
 ```
@@ -139,7 +139,7 @@ Export-PfxCertificate \
 The export succeeded and created:
 
 ```text
-C:\Users\carles.abella\Desktop\localhost.pfx
+%USERPROFILE%\Desktop\localhost.pfx
 ```
 
 This is the file that can be used in the System Monitor Configuration API setup UI.
@@ -150,12 +150,12 @@ This is the file that can be used in the System Monitor Configuration API setup 
 
 ### Certificate file
 ```text
-C:\Users\carles.abella\Desktop\localhost.pfx
+%USERPROFILE%\Desktop\localhost.pfx
 ```
 
 ### Password
 ```text
-ChangeThisPassword123!
+<the password you chose in Step 4>
 ```
 
 ---
@@ -215,13 +215,13 @@ Get-ChildItem Cert:\CurrentUser\My |
 
 ### Create password object
 ```powershell
-$pwd = ConvertTo-SecureString -String "ChangeThisPassword123!" -Force -AsPlainText
+$pwd = ConvertTo-SecureString -String "YourSecurePassword" -Force -AsPlainText
 ```
 
 ### Export to PFX on Desktop
 ```powershell
 Export-PfxCertificate \
-    -Cert "Cert:\CurrentUser\My\2A63BF5D4A3E91DE1A634DA64A5E89505D06E26A" \
+    -Cert "Cert:\CurrentUser\My\<YOUR_CERTIFICATE_THUMBPRINT>" \
     -FilePath "$env:USERPROFILE\Desktop\localhost.pfx" \
     -Password $pwd
 ```
