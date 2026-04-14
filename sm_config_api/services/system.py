@@ -29,14 +29,14 @@ class SystemService(BaseService):
     # Status & connectivity
     # ------------------------------------------------------------------
 
-    def get_status(self) -> pb2.StatusReply:
+    def get_status(self, *, timeout: float | None = ...) -> pb2.StatusReply:  # type: ignore[assignment]
         """Get the current System Monitor status.
 
         Returns:
             ``StatusReply`` with ``link_status``, ``online``, ``live_update``,
             ``return_code``.
         """
-        return self._call(self._stub.GetStatus)
+        return self._call(self._stub.GetStatus, timeout=timeout)
 
     def set_online(self, state: bool) -> None:
         """Set the online state of System Monitor.

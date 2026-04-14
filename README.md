@@ -223,6 +223,11 @@ Features:
 - Light and dark theme support
 
 
+<p align="center">
+  <img src="gui/gui_dashboard.png" width="1200" alt="System Monitor Configuration API GUI Dashboard">
+</p>
+
+
 ## Testing
 
 ```bash
