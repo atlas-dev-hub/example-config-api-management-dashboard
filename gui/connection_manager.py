@@ -88,9 +88,9 @@ class SMConnection:
         """Open the gRPC connection and verify the server is reachable."""
         self.failed = False
         try:
-            self.client = SystemMonitorClient(self.config(), timeout=5.0)
+            self.client = SystemMonitorClient(self.config(), timeout=None)
             # gRPC channels are lazy — force an actual RPC to verify connectivity
-            status = self.client.system.get_status()
+            status = self.client.system.get_status(timeout=15.0)
             self.connected = True
             self.error_message = ""
             # Populate initial status from the validation call
@@ -137,7 +137,7 @@ class SMConnection:
             return
         try:
             from sm_config_api.enums import LinkStatus
-            status = self.client.system.get_status()
+            status = self.client.system.get_status(timeout=15.0)
             try:
                 self.link_status = LinkStatus(status.link_status).name
             except ValueError:

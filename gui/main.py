@@ -329,7 +329,8 @@ class MainWindow(QMainWindow):
 
         g = self._group(layout, "Events & Errors")
         self._action_btn(g, "Get Errors", self._call, "project", "get_errors")
-        self._action_btn(g, "Get Events", self._call, "project", "get_events")
+        self._action_btn_with_app_combo(g, "Get Events",
+                                         self._call_hex_arg, "project", "get_events")
 
         layout.addStretch()
         self._tabs.addTab(scroll, "📁 Project")
@@ -369,6 +370,41 @@ class MainWindow(QMainWindow):
 
         g = self._group(layout, "Utility")
         self._action_btn(g, "Delete Min/Max", self._call, "parameter", "delete_min_max")
+
+        # ── Live Parameter Watch ──
+        g = self._group(layout, "Live Parameter Watch (first 25 params, every 1s)")
+        row = QHBoxLayout()
+        self._watch_start_btn = QPushButton("Start")
+        self._watch_start_btn.setFixedWidth(120)
+        self._watch_start_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {SUCCESS}; color: white; "
+            f"padding: 6px 12px; border: none; border-radius: 3px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: #0b5e0b; }}"
+        )
+        self._watch_stop_btn = QPushButton("Stop")
+        self._watch_stop_btn.setFixedWidth(120)
+        self._watch_stop_btn.setEnabled(False)
+        self._watch_stop_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {ERROR}; color: white; "
+            f"padding: 6px 12px; border: none; border-radius: 3px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: #a02a2a; }}"
+        )
+        row.addWidget(self._watch_start_btn)
+        row.addWidget(self._watch_stop_btn)
+        row.addWidget(QLabel("App:"))
+        self._watch_app_combo = self._make_app_combo()
+        row.addWidget(self._watch_app_combo)
+        row.addStretch()
+        g.addLayout(row)
+
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setInterval(1000)
+        self._watch_timer.timeout.connect(self._watch_tick)
+        self._watch_param_ids: list[str] = []
+        self._watch_busy = False
+
+        self._watch_start_btn.clicked.connect(self._watch_start)
+        self._watch_stop_btn.clicked.connect(self._watch_stop)
 
         layout.addStretch()
         self._tabs.addTab(scroll, "📊 Parameters")
@@ -883,6 +919,93 @@ class MainWindow(QMainWindow):
             return
         self._call(service_name, method_name, app_id, param_ids)
 
+    # ── Live Parameter Watch ─────────────────────────────────────────
+
+    def _watch_start(self):
+        """Fetch the first 25 parameter IDs for the selected app, then start polling."""
+        client = self._get_client()
+        if not client:
+            return
+        app_id = self._parse_app_id(self._watch_app_combo)
+        if app_id is None:
+            return
+
+        self._watch_start_btn.setEnabled(False)
+        self._watch_stop_btn.setEnabled(True)
+        self._watch_app_combo.setEnabled(False)
+        self._log_info(f"Fetching parameter list for app {app_id}...")
+
+        def fetch_params():
+            params = client.parameter.get_parameters(app_id, data_type=0)
+            ids = [p.id for p in params[:25]]
+            return app_id, ids
+
+        def on_fetched(data):
+            aid, ids = data
+            if not ids:
+                self._log_error("No parameters found for this application")
+                self._watch_stop()
+                return
+            self._watch_param_ids = ids
+            self._watch_app_id = aid
+            self._log_success(f"Watching {len(ids)} parameters on app {aid}")
+            self._watch_timer.start()
+
+        def on_err(e):
+            self._log_error(str(e))
+            self._watch_stop()
+
+        t, w, b = run_in_thread(fetch_params, on_success=on_fetched,
+                                on_error=on_err, parent=self)
+        self._threads.append((t, w, b))
+
+    def _watch_stop(self):
+        """Stop the live watch polling."""
+        self._watch_timer.stop()
+        self._watch_param_ids = []
+        self._watch_busy = False
+        self._watch_start_btn.setEnabled(True)
+        self._watch_stop_btn.setEnabled(False)
+        self._watch_app_combo.setEnabled(True)
+        self._log_info("Live watch stopped")
+
+    def _watch_tick(self):
+        """Called every 1s by the timer — fetch values in a background thread."""
+        if self._watch_busy or not self._watch_param_ids:
+            return
+        client = self._get_client()
+        if not client:
+            self._watch_stop()
+            return
+
+        self._watch_busy = True
+        app_id = self._watch_app_id
+        param_ids = self._watch_param_ids
+
+        def do_read():
+            t0 = time.perf_counter()
+            values = client.parameter.get_value_measurement(app_id, param_ids)
+            elapsed = (time.perf_counter() - t0) * 1000
+            return values, elapsed
+
+        def on_done(data):
+            self._watch_busy = False
+            values, elapsed = data
+            lines = []
+            for v in values:
+                lines.append(f"  {v.parameter_id:30s} = {v.value}")
+            header = f"Watch ({len(values)} params, {elapsed:.0f}ms)"
+            self._log_success(header)
+            self._log_info("\n".join(lines))
+
+        def on_err(e):
+            self._watch_busy = False
+            self._log_error(f"Watch error: {e}")
+
+        t, w, b = run_in_thread(do_read, on_success=on_done,
+                                on_error=on_err, parent=self)
+        self._threads.append((t, w, b))
+
     # ── Output log ───────────────────────────────────────────────────
 
     def _log(self, text: str, color: str):
@@ -915,27 +1038,40 @@ class MainWindow(QMainWindow):
         text = str(result)
         if hasattr(result, "__len__") and not isinstance(result, str):
             count = len(result)
+            items = []
+            for item in (list(result)[:20] if count > 20 else result):
+                items.append(self._format_item(item))
+            text = f"[{count} items]\n" + "\n".join(f"  {i}" for i in items)
             if count > 20:
-                # Truncate long lists
-                items = []
-                for item in list(result)[:20]:
-                    items.append(str(item).replace("\n", " ")[:120])
-                text = f"[{count} items]\n" + "\n".join(f"  {i}" for i in items) + "\n  ..."
-            else:
-                items = []
-                for item in result:
-                    items.append(str(item).replace("\n", " ")[:120])
-                text = f"[{count} items]\n" + "\n".join(f"  {i}" for i in items)
+                text += "\n  ..."
         else:
-            text = str(result).replace("\n", " | ")[:500]
+            text = self._format_item(result)[:500]
         # Escape HTML
         text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace("\n", "<br>")
         self._log(f"  {text}", "#d4d4d4")
 
+    @staticmethod
+    def _format_item(item: Any) -> str:
+        """Format a single result item, ensuring protobuf default values are shown."""
+        from google.protobuf.message import Message as PbMessage
+        if isinstance(item, PbMessage):
+            from google.protobuf.json_format import MessageToDict
+            d = MessageToDict(item, preserving_proto_field_name=True,
+                              always_print_fields_with_no_presence=True,
+                              use_integers_for_enums=True)
+            parts = []
+            for k, v in d.items():
+                if k == "return_code" and v == 0:
+                    continue
+                parts.append(f"{k}: {v}")
+            return " | ".join(parts) if parts else str(item)
+        return str(item).replace("\n", " ")[:120]
+
     # ── Cleanup ──────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        self._watch_timer.stop()
         self._poller.stop()
         self._poller_thread.quit()
         self._poller_thread.wait(2000)
