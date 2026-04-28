@@ -28,23 +28,67 @@ Available from System Monitor version **8.85** onwards.
 - Network connectivity to the System Monitor host on the configured API port (default: 7000)
 
 
-## Installation
+## First-Time Setup (REQUIRED)
+
+After cloning, you **must** complete these steps before anything will work.
+The gRPC stub files are **not** checked into the repository — they must be
+generated from the `.proto` definitions.
+
+### Option A — pip + requirements.txt (recommended for quick start)
 
 ```bash
-# Clone the repository
+# 1. Clone
 git clone <repository-url>
 cd SystemMonitor_Configuration_API
 
-# Create and activate a virtual environment
+# 2. Create and activate a virtual environment
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 source .venv/bin/activate     # Linux / macOS
 
-# Install the package in development mode
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Generate gRPC stubs (MANDATORY — the library will NOT import without this)
+python scripts/generate_protos.py
+```
+
+### Option B — editable install via pyproject.toml
+
+```bash
+# Steps 1-2 same as above
+
+# 3. Install core + dev dependencies
 pip install -e ".[dev]"
 
-# Generate gRPC stubs from proto definitions
+# 4. (Optional) If you want the desktop GUI, also install:
+pip install -e ".[gui]"
+
+# 5. Generate gRPC stubs (MANDATORY)
 python scripts/generate_protos.py
+```
+
+### What `generate_protos.py` does
+
+This script uses `grpc_tools.protoc` to compile the six `.proto` files in
+`protos/` into Python source files (`*_pb2.py`, `*_pb2_grpc.py`, `*_pb2.pyi`)
+inside `sm_config_api/generated/`. It also fixes relative imports so the
+generated modules work as part of the `sm_config_api` package.
+
+If this step fails, check that `grpcio-tools` is installed:
+
+```bash
+pip show grpcio-tools
+```
+
+### Verify the installation
+
+```bash
+# The following should import without errors (no System Monitor needed)
+python -c "from sm_config_api import ConnectionConfig; print('OK')"
+
+# Run unit tests
+pytest tests/ -v
 ```
 
 
@@ -207,7 +251,16 @@ client.virtual.get_virtual_parameters(app_id=3840)
 
 ## Desktop GUI
 
-A PySide6 desktop application is included for interactive use:
+A PySide6 desktop application is included for interactive use.
+
+**Requires PySide6** — install it if you used Option B without `[gui]`:
+
+```bash
+pip install PySide6>=6.5
+# or:  pip install -e ".[gui]"
+```
+
+Launch the GUI:
 
 ```bash
 python run_gui.py
@@ -247,7 +300,7 @@ python scripts/smoke_test.py --address 10.0.0.1:7000
 
 For a detailed explanation of the Configuration API architecture, protocol design, and implementation walkthrough, refer to:
 
-- [CONFIGURATION_API_GUIDE.md](CONFIGURATION_API_GUIDE.md) -- Comprehensive technical guide
+- [CONFIGURATION_API_GUIDE.md](docs/CONFIGURATION_API_GUIDE.md) -- Comprehensive technical guide
 
 
 ## References

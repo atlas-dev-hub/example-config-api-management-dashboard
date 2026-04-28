@@ -14,7 +14,7 @@ from functools import partial
 from typing import Any, Callable, Sequence
 
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject, Slot
-from PySide6.QtGui import QColor, QFont, QIcon, QTextCharFormat
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QTextCharFormat
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QTextEdit,
     QTreeWidget,
@@ -135,6 +137,7 @@ class MainWindow(QMainWindow):
         self._poller.updated.connect(self._refresh_connection_list, Qt.QueuedConnection)
 
         self._build_ui()
+        self._topology.set_theme(True)
         self._poller.updated.connect(self._topology.refresh, Qt.QueuedConnection)
         self._topology.card_action.connect(self._on_card_action, Qt.QueuedConnection)
         self._poller_thread.start()
@@ -160,8 +163,8 @@ class MainWindow(QMainWindow):
         h_lay.addStretch()
 
         # Theme toggle button
-        self._dark_mode = False
-        self._theme_btn = QPushButton("🌙 Dark")
+        self._dark_mode = True
+        self._theme_btn = QPushButton("☀ Light")
         self._theme_btn.setFixedWidth(90)
         self._theme_btn.setStyleSheet(
             "QPushButton { background: rgba(255,255,255,0.15); color: white; "
@@ -397,10 +400,26 @@ class MainWindow(QMainWindow):
         row.addStretch()
         g.addLayout(row)
 
+        # ── Watch table ──
+        self._watch_table = QTableWidget(0, 2)
+        self._watch_table.setHorizontalHeaderLabels(["Parameter", "Value"])
+        self._watch_table.horizontalHeader().setStretchLastSection(True)
+        self._watch_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._watch_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self._watch_table.setColumnWidth(1, 140)
+        self._watch_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._watch_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._watch_table.setAlternatingRowColors(True)
+        self._watch_table.verticalHeader().setVisible(False)
+        self._watch_table.setFont(QFont("Cascadia Mono", 9))
+        layout.addWidget(self._watch_table)
+
         self._watch_timer = QTimer(self)
         self._watch_timer.setInterval(1000)
         self._watch_timer.timeout.connect(self._watch_tick)
         self._watch_param_ids: list[str] = []
+        self._watch_param_info: list[dict] = []  # {id, name}
+        self._watch_prev_values: dict[str, float] = {}
         self._watch_busy = False
 
         self._watch_start_btn.clicked.connect(self._watch_start)
@@ -922,7 +941,7 @@ class MainWindow(QMainWindow):
     # ── Live Parameter Watch ─────────────────────────────────────────
 
     def _watch_start(self):
-        """Fetch the first 25 parameter IDs for the selected app, then start polling."""
+        """Fetch the first 25 MEASUREMENT parameters for the selected app, then start polling."""
         client = self._get_client()
         if not client:
             return
@@ -933,22 +952,32 @@ class MainWindow(QMainWindow):
         self._watch_start_btn.setEnabled(False)
         self._watch_stop_btn.setEnabled(True)
         self._watch_app_combo.setEnabled(False)
-        self._log_info(f"Fetching parameter list for app {app_id}...")
+        self._log_info(f"Fetching measurement parameters for app {app_id}...")
 
         def fetch_params():
-            params = client.parameter.get_parameters(app_id, data_type=0)
-            ids = [p.id for p in params[:25]]
-            return app_id, ids
+            from sm_config_api.enums import ParameterType
+            params = client.parameter.get_parameters(app_id, data_type=ParameterType.MEASUREMENT)
+            info = [{"id": p.id, "name": p.name} for p in params[:25]]
+            return app_id, info
 
         def on_fetched(data):
-            aid, ids = data
-            if not ids:
-                self._log_error("No parameters found for this application")
+            aid, info = data
+            if not info:
+                self._log_error("No measurement parameters found for this application")
                 self._watch_stop()
                 return
-            self._watch_param_ids = ids
+            self._watch_param_info = info
+            self._watch_param_ids = [p["id"] for p in info]
+            self._watch_prev_values.clear()
             self._watch_app_id = aid
-            self._log_success(f"Watching {len(ids)} parameters on app {aid}")
+
+            self._watch_table.setRowCount(0)
+            for i, p in enumerate(info):
+                self._watch_table.insertRow(i)
+                self._watch_table.setItem(i, 0, QTableWidgetItem(p["name"]))
+                self._watch_table.setItem(i, 1, QTableWidgetItem("—"))
+
+            self._log_success(f"Watching {len(info)} parameters on app {aid}")
             self._watch_timer.start()
 
         def on_err(e):
@@ -960,9 +989,8 @@ class MainWindow(QMainWindow):
         self._threads.append((t, w, b))
 
     def _watch_stop(self):
-        """Stop the live watch polling."""
+        """Stop the live watch polling — keep table data visible."""
         self._watch_timer.stop()
-        self._watch_param_ids = []
         self._watch_busy = False
         self._watch_start_btn.setEnabled(True)
         self._watch_stop_btn.setEnabled(False)
@@ -970,7 +998,7 @@ class MainWindow(QMainWindow):
         self._log_info("Live watch stopped")
 
     def _watch_tick(self):
-        """Called every 1s by the timer — fetch values in a background thread."""
+        """Called every 1s by the timer — fetch values and update the table."""
         if self._watch_busy or not self._watch_param_ids:
             return
         client = self._get_client()
@@ -991,9 +1019,34 @@ class MainWindow(QMainWindow):
         def on_done(data):
             self._watch_busy = False
             values, elapsed = data
+            val_map = {v.parameter_id: v.value for v in values}
+
+            # Clear previous flash highlights
+            for i in range(self._watch_table.rowCount()):
+                flash_item = self._watch_table.item(i, 1)
+                if flash_item:
+                    flash_item.setBackground(QBrush())
+
             lines = []
-            for v in values:
-                lines.append(f"  {v.parameter_id:30s} = {v.value}")
+            for i, pinfo in enumerate(self._watch_param_info):
+                pid = pinfo["id"]
+                new_val = val_map.get(pid)
+                if new_val is None:
+                    continue
+                prev = self._watch_prev_values.get(pid)
+                self._watch_prev_values[pid] = new_val
+
+                item = self._watch_table.item(i, 1)
+                if item is None:
+                    item = QTableWidgetItem()
+                    self._watch_table.setItem(i, 1, item)
+                item.setText(f"{new_val:.4g}")
+
+                if prev is not None and prev != new_val:
+                    item.setBackground(QBrush(QColor("#D4572A")))
+
+                lines.append(f"  {pinfo['name']:30s} = {new_val:.4g}")
+
             header = f"Watch ({len(values)} params, {elapsed:.0f}ms)"
             self._log_success(header)
             self._log_info("\n".join(lines))

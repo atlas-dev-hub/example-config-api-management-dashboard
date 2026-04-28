@@ -1,12 +1,22 @@
 [
   {
-    "name": "local_system_monitor",
+    "name": "LocalLaptop",
     "address": "localhost:7000",
     "insecure": false
   },
   {
-    "name": "remote_example",
-    "address": "10.0.0.50:5001",
+    "name": "VirtualMachine",
+    "address": "10.104.94.43:5001",
+    "insecure": false
+  },
+  {
+    "name": "HIL1",
+    "address": "test",
+    "insecure": false
+  },
+  {
+    "name": "HIL2",
+    "address": "test",
     "insecure": false
   }
 ]
